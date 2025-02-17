@@ -1,0 +1,94 @@
+import cv2
+import numpy as np
+try:
+    from cryptography.fernet import Fernet
+except ImportError:
+    import sys
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "cryptography"])
+    from cryptography.fernet import Fernet
+import binascii
+from PIL import Image
+
+# Generate AES key (Use this key to encrypt/decrypt messages)
+def generate_key():
+    return Fernet.generate_key()
+
+# Encrypt the message using AES
+def encrypt_message(key, message):
+    cipher = Fernet(key)
+    return cipher.encrypt(message.encode())
+
+# Decrypt the message using AES
+def decrypt_message(key, encrypted_message):
+    cipher = Fernet(key)
+    return cipher.decrypt(encrypted_message).decode()
+
+# Convert message into binary
+def message_to_binary(message):
+    if isinstance(message, bytes):
+        return ''.join(format(byte, '08b') for byte in message)
+    elif isinstance(message, str):
+        return ''.join(format(ord(char), '08b') for char in message)
+    else:
+        raise TypeError("Input must be a string or bytes")
+
+# Hide encrypted data inside an image using LSB
+def hide_data(image_path, message, key):
+    image = cv2.imread("C:\\Users\\Pratiksha\\OneDrive\\Pictures\\Screenshots\\Screenshot 2024-12-18 172047.png")
+    if image is None:
+        raise FileNotFoundError(f"Could not open or read the image file: {image_path}")
+    
+    encrypted_message = encrypt_message(key, message)
+    binary_message = message_to_binary(encrypted_message) + '1111111111111110'  # End delimiter
+    
+    data_index = 0
+    binary_message_length = len(binary_message)
+    rows, cols, _ = image.shape
+    
+    for row in range(rows):
+        for col in range(cols):
+            pixel = image[row, col]
+            for channel in range(3):  # BGR channels
+                if data_index < binary_message_length:
+                    pixel[channel] = (pixel[channel] & 0xFE) | int(binary_message[data_index])
+                    data_index += 1
+    
+    stego_image_path = "stego_image.png"
+    cv2.imwrite(stego_image_path, image)
+    return stego_image_path
+
+# Extract hidden data from the stego image
+def extract_data(image_path, key):
+    image = cv2.imread(image_path)
+    if image is None:
+        raise FileNotFoundError(f"Could not open or read the image file: {image_path}")
+    
+    binary_data = ""
+    
+    for row in image:
+        for pixel in row:
+            for channel in pixel:
+                binary_data += str(channel & 1)
+                if binary_data[-16:] == '1111111111111110':  # Stop if end delimiter is found
+                    binary_data = binary_data[:-16]
+                    encrypted_message = binascii.unhexlify('%x' % int(binary_data, 2))
+                    return decrypt_message(key, encrypted_message)
+    return "No hidden message found"
+
+# Example Usage
+if __name__ == "__main__":
+    key = generate_key()
+    print(f"Encryption Key (Save this for decryption): {key.decode()}")
+    
+    secret_message = "Top Secret Information"
+    image_path = "input_image.png"  # Provide your own image
+    
+    try:
+        stego_image = hide_data(image_path, secret_message, key)
+        print(f"Data hidden inside {stego_image}")
+        
+        extracted_message = extract_data(stego_image, key)
+        print(f"Extracted Message: {extracted_message}")
+    except FileNotFoundError as e:
+        print(e)
